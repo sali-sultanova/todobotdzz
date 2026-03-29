@@ -12,12 +12,10 @@ FILE = "tasks.json"
 
 dp = Dispatcher()
 
-
 class TaskState(StatesGroup):
     add1 = State()
     done1 = State()
     delete1 = State()
-
 
 def load_data():
     try:
