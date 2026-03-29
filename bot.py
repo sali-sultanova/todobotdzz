@@ -7,8 +7,9 @@ from aiogram.types import Message
 import json
 from bottoken import TOKEN
 from aiogram.client.session.aiohttp import AiohttpSession
-from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from datetime import datetime, timedelta
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
 
 FILE = "tasks.json"
@@ -19,6 +20,7 @@ sh = AsyncIOScheduler()
 class TaskState(StatesGroup):
     add1 = State()
     adddeadline= State()
+    remindtime = State()
     done1 = State()
     delete1 = State()
 
@@ -35,6 +37,15 @@ def save_data(data):
 
 async def remind(bot: Bot, chat_id: str, text: str):
     await bot.send_message(chat_id, f"!!!: {text}")
+
+def get_remind():
+    buttons = [
+        [InlineKeyboardButton(text="Через 1 час", callback_data="r_60")],
+        [InlineKeyboardButton(text="Через 3 часа", callback_data="r_180")],
+        [InlineKeyboardButton(text="Через 1 день", callback_data="r_1440")],
+        [InlineKeyboardButton(text="Ввести свою дату", callback_data="r_custom")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 tasks = load_data()
@@ -59,28 +70,66 @@ async def add_finish(message: Message, state: FSMContext):
 
 @dp.message(TaskState.adddeadline)
 async def adddeadline_finish(message: Message, state: FSMContext):
+    await state.update_data(deadline=message.text)
+    await message.answer("Когда напоминанить?", reply_markup=get_remind())
+    await state.set_state(TaskState.remindtime)
+
+@dp.callback_query(F.data.startswith("r"))
+async def remind_choice(callback: CallbackQuery, state: FSMContext):
+    if callback.data == "r_custom":
+        await callback.message.answer("Введите дату напоминания (формат: 29.03.2026 16:00):")
+        await callback.answer()
+        return
+    minutes = int(callback.data.split("_")[1])
     userd = await state.get_data()
     task = userd['task']
-    deadline = message.text
-    uid = str(message.from_user.id)
+    deadline = userd['deadline']
+    uid = str(callback.from_user.id)
     if uid not in tasks:
         tasks[uid] = []
-    tasks[uid].append({
-        "text": task,
-        "done": False,
-        "date": deadline
-    })
+    tasks[uid].append({"text": task, "done": False, "date": deadline})
     save_data(tasks)
 
-    timer = datetime.now() + timedelta(minutes=1)
+    timer = datetime.now() + timedelta(minutes=minutes)
     sh.add_job(
         remind,
         trigger="date",
         run_date=timer,
+        kwargs={"bot": callback.bot, "chat_id": uid, "text": task}
+    )
+    await callback.message.answer(f"Задача добавлена! Напомню через {minutes} мин.")
+    await callback.answer()
+    await state.clear()
+
+
+@dp.message(TaskState.remindtime)
+async def customremind(message: Message, state: FSMContext):
+    try:
+        timer = datetime.strptime(message.text, "%d.%m.%Y %H:%M")
+        if timer < datetime.now():
+            return await message.answer("Введите будущую дату:")
+        await finish(message, state, timer)
+    except ValueError:
+        await message.answer("неправильный формат. Пример: 29.03.2026 18:00")
+
+async def finish(message: Message, state: FSMContext, timer_date: datetime):
+    userd = await state.get_data()
+    task = userd['task']
+    deadline = userd['deadline']
+    uid = str(message.chat.id)
+    if uid not in tasks:
+        tasks[uid] = []
+    tasks[uid].append({"text": task, "done": False, "date": deadline})
+    save_data(tasks)
+    sh.add_job(
+        remind,
+        trigger="date",
+        run_date=timer_date,
         kwargs={"bot": message.bot, "chat_id": uid, "text": task}
     )
-    await message.answer(f"Задача '{task}' с дедлайном {deadline} добавлена!")
+    await message.answer(f"Задача добавлена! Напомню: {timer_date.strftime('%d.%m %H:%M')}")
     await state.clear()
+
 
 
 @dp.message(Command("tasks"))
