@@ -6,6 +6,7 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import Message
 import json
 from bottoken import TOKEN
+from aiogram.client.session.aiohttp import AiohttpSession
 
 FILE = "tasks.json"
 
@@ -135,7 +136,12 @@ async def stats(message: Message):
     await message.answer(f"Всего: {total}\nВыполнено: {donecount}\nОсталось: {total - donecount}")
 
 async def main():
-    bot = Bot(token=TOKEN)
+    session = AiohttpSession(proxy="http://oNKKt5:H0ET6w@161.115.231.116:9019")
+    bot = Bot(
+        token=TOKEN,
+        session = session
+    )
+
     print("Бот запущен")
     await dp.start_polling(bot)
 
