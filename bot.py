@@ -7,13 +7,18 @@ from aiogram.types import Message
 import json
 from bottoken import TOKEN
 from aiogram.client.session.aiohttp import AiohttpSession
+from datetime import datetime, timedelta
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
 
 FILE = "tasks.json"
 
 dp = Dispatcher()
+sh = AsyncIOScheduler()
 
 class TaskState(StatesGroup):
     add1 = State()
+    adddeadline= State()
     done1 = State()
     delete1 = State()
 
@@ -24,10 +29,12 @@ def load_data():
     except FileNotFoundError:
         return {}
 
-
 def save_data(data):
     with open(FILE, "w") as f:
         json.dump(data, f)
+
+async def remind(bot: Bot, chat_id: str, text: str):
+    await bot.send_message(chat_id, f"!!!: {text}")
 
 
 tasks = load_data()
@@ -46,13 +53,33 @@ async def adds(message: Message, state: FSMContext):
 
 @dp.message(TaskState.add1)
 async def add_finish(message: Message, state: FSMContext):
+    await state.update_data(task=message.text)
+    await message.answer("Введите дату дедлайна (ex: 29.03.2026):")
+    await state.set_state(TaskState.adddeadline)
+
+@dp.message(TaskState.adddeadline)
+async def adddeadline_finish(message: Message, state: FSMContext):
+    userd = await state.get_data()
+    task = userd['task']
+    deadline = message.text
     uid = str(message.from_user.id)
     if uid not in tasks:
         tasks[uid] = []
-    tasks[uid].append({"text": message.text, "done": False})
-
+    tasks[uid].append({
+        "text": task,
+        "done": False,
+        "date": deadline
+    })
     save_data(tasks)
-    await message.answer("Задача добавлена!")
+
+    timer = datetime.now() + timedelta(minutes=1)
+    sh.add_job(
+        remind,
+        trigger="date",
+        run_date=timer,
+        kwargs={"bot": message.bot, "chat_id": uid, "text": task}
+    )
+    await message.answer(f"Задача '{task}' с дедлайном {deadline} добавлена!")
     await state.clear()
 
 
@@ -69,7 +96,11 @@ async def alltask(message: Message):
     num = 1
     for i in tasks1:
         tik = "✅" if i["done"] else ""
-        res += f"{num}. {i['text']} {tik}\n"
+        if 'date' in i:
+            deadline = i["date"]
+        else:
+            deadline = ""
+        res += f"{num}. {i['text']} (дедлайн: {deadline})  {tik}\n"
         num += 1
     await message.answer(res)
 
@@ -141,6 +172,7 @@ async def main():
     )
 
     print("Бот запущен")
+    sh.start()
     await dp.start_polling(bot)
 
 
