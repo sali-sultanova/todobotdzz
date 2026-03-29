@@ -1,4 +1,5 @@
 bottoken.py
 tasks.json
 __pycache__/
+.idea/
 .env
